@@ -24,4 +24,12 @@ class InitializersTest < Minitest::Test
     end
   end
 
+  def test_dup_does_not_modify_original_store
+    @attr_string.add_attrs(0..4, bold: true)
+    original_range_id = @attr_string.instance_variable_get(:@store).first[:range].object_id
+    @attr_string.dup
+    after_range_id = @attr_string.instance_variable_get(:@store).first[:range].object_id
+    assert_equal original_range_id, after_range_id
+  end
+
 end

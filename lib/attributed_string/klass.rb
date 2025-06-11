@@ -20,8 +20,9 @@ class AttributedString < String
   def dup
     super.tap do |copy|
       new_store = @store.map do |entry|
-        entry[:range] = entry[:range].dup
-        entry.dup
+        entry_dup = entry.dup
+        entry_dup[:range] = entry_dup[:range].dup
+        entry_dup
       end
       copy.instance_variable_set(:@store, new_store)
     end
