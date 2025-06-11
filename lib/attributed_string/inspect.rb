@@ -9,87 +9,58 @@ class AttributedString
 #   "and these have none").inspect
 #
   def inspect(color: false)
-    # Collect all positions where attributes change
-    positions = Set.new
-
-    @store.each do |attr|
-      range = attr[:range]
-      positions << range.begin
-      positions << range.begin + range.size
+    attachments_map = attachments_with_positions(range: 0...length).each_with_object({}) do |entry, h|
+      h[entry[:position]] = entry[:attachment]
     end
 
-    # Include the start and end positions of the string
-    positions << 0
-    positions << self.length
-
-    # Sort all positions
-    positions = positions.to_a.sort
-
     result = ""
-    last_attrs = {}  # Initialize as empty hash
+    last_attrs = {}
 
-    positions.each_cons(2) do |start_pos, end_pos|
-      next if start_pos >= end_pos  # Skip invalid ranges
-
-      substring = self.to_s[start_pos...end_pos]
-      attrs_before = last_attrs
-      attachment = attachment_at(start_pos)
-      attrs_after = attrs_at(start_pos)
-
-      # Determine attribute changes
+    each_span_with_attrs.with_index do |(substring, attrs, range), span_idx|
       ended_attrs = {}
       started_attrs = {}
 
-      # Attributes that have ended or changed
-      attrs_before.each do |key, value|
-        if !attrs_after.key?(key)
-          # Attribute has ended
+      last_attrs.each do |key, value|
+        if !attrs.key?(key)
           ended_attrs[key] = value
-        elsif attrs_after[key] != value
-          # Attribute value has changed; treat as ending old and starting new
+        elsif attrs[key] != value
           ended_attrs[key] = value
-          started_attrs[key] = attrs_after[key]
+          started_attrs[key] = attrs[key]
         end
       end
 
-      # Attributes that have started
-      attrs_after.each do |key, value|
-        if !attrs_before.key?(key)
-          started_attrs[key] = value
-        end
+      attrs.each do |key, value|
+        started_attrs[key] = value unless last_attrs.key?(key)
       end
 
-      # Remove attributes that both ended and started (value change)
       ended_attrs.delete_if { |k, _| started_attrs.key?(k) }
 
       unless ended_attrs.empty? && started_attrs.empty?
-        attrs_str = ended_attrs.keys.sort.map{ |k| "-#{k}" }
-        attrs_str += started_attrs.to_a.sort{ |a,b| a[0] <=> b[0] }.map{ |a| "#{a[0]}: #{a[1]}" }
-        attrs_str = "{ #{attrs_str.join(', ')} }"
-        result += dim(attrs_str, color: color)
+        attrs_str = ended_attrs.keys.sort.map { |k| "-#{k}" }
+        attrs_str += started_attrs.sort_by { |a, _| a }.map { |k, v| "#{k}: #{v}" }
+        result << dim("{ #{attrs_str.join(', ')} }", color: color)
       end
 
-      if attachment
-        substring = dim("[#{attachment}]", color: color)
+      substring.chars.each_with_index do |char, i|
+        pos = range.begin + i
+        if char.to_s == ATTACHMENT_CHARACTER && attachments_map.key?(pos)
+          result << dim("[#{attachments_map[pos]}]", color: color)
+        else
+          result << char
+        end
       end
 
-      # Append the substring
-      result += substring
-
-      last_attrs = attrs_after
+      last_attrs = attrs
     end
 
-    # Close any remaining attributes
     unless last_attrs.empty?
-      result += dim("{ #{last_attrs.keys.sort.map{ |k| "-#{k}" }.join(", ")} }", color: color)
+      result << dim("{ #{last_attrs.keys.sort.map { |k| "-#{k}" }.join(', ')} }", color: color)
     end
 
     result
   end
 
-
   def dim(string, color: true)
     color ? "\e[2m#{string}\e[22m" : string
   end
-
 end

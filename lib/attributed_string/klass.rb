@@ -1,3 +1,5 @@
+require 'set'
+
 class AttributedString < String
 
   alias_method :original_slice, :slice
@@ -106,6 +108,119 @@ class AttributedString < String
     return false unless other.is_a?(AttributedString)
     # not super efficient, but it works for now
     (0...length).all? { |i| attrs_at(i) == other.attrs_at(i) && attachment_at(i) == other.attachment_at(i) } && super
+  end
+
+  # Iterates over contiguous spans of the string that share the same active
+  # attributes. Yields the substring, the attributes for that span, and the
+  # span range. This avoids yielding once per character and instead jumps
+  # directly to points where attributes change, allowing callers to operate in
+  # O(n + k) time where `n` is the number of attribute ranges and `k` is the
+  # resulting span count.
+  def each_span_with_attrs
+    return enum_for(:each_span_with_attrs) unless block_given?
+
+    starts = Hash.new { |h, k| h[k] = [] }
+    ends = Hash.new { |h, k| h[k] = [] }
+
+    @store.each do |entry|
+      next unless entry[:range]
+      next if entry[:attachment] # attachments do not affect attrs
+      range = entry[:range]
+      starts[range.begin] << entry
+      end_point = range.end + 1
+      ends[end_point] << entry if end_point <= length
+    end
+
+    event_positions = Set.new([0, length])
+    event_positions.merge(starts.keys)
+    event_positions.merge(ends.keys)
+    events = event_positions.to_a.sort
+
+    stacks = Hash.new { |h, k| h[k] = [] }
+    attrs = {}
+
+    compute_value = lambda do |key|
+      stack = stacks[key]
+      array_mode = stack.any? { |_, v| v.is_a?(Array) }
+      if array_mode
+        combined = []
+        stack.each { |_, v| combined.concat(v) unless v == :__deleted__ }
+        if combined.empty?
+          attrs.delete(key)
+        else
+          attrs[key] = combined
+        end
+      else
+        val = nil
+        stack.reverse_each do |_, v|
+          next if v == :__deleted__
+          val = v
+          break
+        end
+        if val.nil?
+          attrs.delete(key)
+        else
+          attrs[key] = val
+        end
+      end
+    end
+
+    remove_stack_entry = lambda do |key, entry|
+      stack = stacks[key]
+      idx = stack&.index { |pair| pair[0].equal?(entry) }
+      return unless idx
+      stack.delete_at(idx)
+      if stack.empty?
+        stacks.delete(key)
+        attrs.delete(key)
+      else
+        compute_value.call(key)
+      end
+    end
+
+    events.each_cons(2) do |start_idx, end_idx|
+      if starts.key?(start_idx)
+        starts[start_idx].each do |entry|
+          if entry[:attributes]
+            entry[:attributes].each do |k, v|
+              stacks[k] << [entry, v]
+              attrs[k] = v
+            end
+          elsif entry[:delete]
+            entry[:delete].each do |k|
+              stacks[k] << [entry, :__deleted__]
+              attrs.delete(k)
+            end
+          elsif entry[:arr_attributes]
+            entry[:arr_attributes].each do |k, v|
+              stacks[k] << [entry, Array(v)]
+              compute_value.call(k)
+            end
+          end
+        end
+      end
+
+      substring = self[start_idx...end_idx]
+      yield substring, attrs.dup, start_idx..(end_idx - 1)
+
+      if ends.key?(end_idx)
+        ends[end_idx].each do |entry|
+          if entry[:attributes]
+            entry[:attributes].each_key do |k|
+              remove_stack_entry.call(k, entry)
+            end
+          elsif entry[:delete]
+            entry[:delete].each do |k|
+              remove_stack_entry.call(k, entry)
+            end
+          elsif entry[:arr_attributes]
+            entry[:arr_attributes].each_key do |k|
+              remove_stack_entry.call(k, entry)
+            end
+          end
+        end
+      end
+    end
   end
 
 
