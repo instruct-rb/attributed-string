@@ -70,4 +70,22 @@ class AddingAttachmentTest < Minitest::Test
     assert_equal "attachment", str.attachment_at(2)
     assert_nil str.attachment_at(3)
   end
+
+  def test_attachments_with_positions_entire_string
+    @str.add_attachment("second", position: 3)
+    results = @str.attachments_with_positions
+    assert_equal [{ attachment: "attachment", position: 1 },
+                  { attachment: "second", position: 3 }], results
+  end
+
+  def test_attachments_with_positions_in_range
+    @str.add_attachment("second", position: 3)
+    results = @str.attachments_with_positions(range: 3..3)
+    assert_equal [{ attachment: "second", position: 3 }], results
+  end
+
+  def test_attachments_with_positions_invalid_range
+    results = @str.attachments_with_positions(range: 100..101)
+    assert_equal [], results
+  end
 end

@@ -69,6 +69,25 @@ Add this line to your application's Gemfile:
   puts hello_world.attachments # => []
 ```
 
+## Iterating Over Attribute Spans
+
+`each_span_with_attrs` yields substrings where the active attributes do not
+change. This allows efficient traversal of long strings with many attribute
+ranges.
+
+```ruby
+  str = AttributedString.new('hello')
+  str.add_attrs(0..1, bold: true)
+  str.add_attrs(2..4, italic: true)
+
+  str.each_span_with_attrs do |substring, attrs, range|
+    p [substring, attrs, range]
+  end
+  # => ["he", { bold: true }, 0..1]
+  # => ["l", {}, 2..2]
+  # => ["lo", { italic: true }, 3..4]
+```
+
 ## More Examples
 See the [test suite](./test).
 
