@@ -53,14 +53,13 @@ class AttributedString < String
     attachments_with_positions(range: range).map { |attachment| attachment[:attachment] }
   end
 
-  # TODO: needs a test
   def attachments_with_positions(range: 0...self.length)
     range = normalize_range(range)
     return [] if range.nil?
-    attachments = []
-    self.chars[range].map.with_index do |char, i|
-      attachments << { attachment: attachment_at(range.begin + i), position: range.begin + i } if char == ATTACHMENT_CHARACTER
+    @store.each_with_object([]) do |entry, arr|
+      if entry[:attachment] && range.include?(entry[:range].begin)
+        arr << { attachment: entry[:attachment], position: entry[:range].begin }
+      end
     end
-    attachments
   end
 end
