@@ -16,52 +16,31 @@ class AttributedString < String
   class FilterResult < String
     # @see AttributedString#filter
     def initialize(attr_string, &block)
-      filtered_positions = []
+      result_parts = []
+      ranges = []
       cached_block_calls = {}
 
-      # TODO: this can be optimized to use the same method that inspect uses which doesn't go through
-      # every character (it goes through each substring span with different ranges)
-      # A presenter type architecture that inspect, rainbow print, and filter can share would be ideal
-      attr_string.each_char.with_index do |char, index|
-        attrs = attr_string.attrs_at(index)
-        # Use the attrs object ID as the cache key to handle different attribute hashes
+      attr_string.each_span_with_attrs do |substring, attrs, range|
         cache_key = attrs.hash
-        cached_result = cached_block_calls.fetch(cache_key) do
-          result = block.call(attrs)
-          cached_block_calls[cache_key] = result
-          result
+        keep = cached_block_calls.fetch(cache_key) do
+          res = block.call(attrs)
+          cached_block_calls[cache_key] = res
+          res
         end
-        if cached_result
-          filtered_positions << index
+        next unless keep
+
+        result_parts << substring
+
+        if ranges.any? && ranges.last.end == range.begin - 1
+          last = ranges.pop
+          ranges << (last.begin..range.end)
+        else
+          ranges << range
         end
       end
 
-      # Group adjacent positions into ranges to minimize allocations
-      ranges = []
-      unless filtered_positions.empty?
-        start_pos = filtered_positions.first
-        prev_pos = start_pos
-        filtered_positions.each_with_index do |pos, idx|
-          next if idx == 0
-          if pos == prev_pos + 1
-            # Continue the current range
-            prev_pos = pos
-          else
-            # End the current range and start a new one
-            ranges << (start_pos..prev_pos)
-            start_pos = pos
-            prev_pos = pos
-          end
-        end
-        # Add the final range
-        ranges << (start_pos..prev_pos)
-      end
-
-      # Concatenate substrings from the original string based on the ranges
-      result_string = ranges.map { |range| attr_string.send(:original_slice,range) }.join
-
-      # Build the list of original positions
-      original_positions = ranges.flat_map { |range| range.to_a }
+      result_string = result_parts.join
+      original_positions = ranges.flat_map { |r| r.to_a }
 
       super(result_string)
       @original_positions = original_positions
@@ -73,14 +52,15 @@ class AttributedString < String
     end
 
     def original_ranges_for(filtered_range)
-      # TODO: this doesn't work for excluded end range
       raise ArgumentError, "Invalid range" unless filtered_range.is_a?(Range)
-      raise ArgumentError, "Range out of bounds" if filtered_range.end >= length
-      if filtered_range.begin > filtered_range.end
+
+      end_idx = filtered_range.end
+      end_idx -= 1 if filtered_range.exclude_end?
+      raise ArgumentError, "Range out of bounds" if end_idx >= length
+
+      if filtered_range.begin > end_idx
+        return [] if filtered_range.begin == end_idx + 1 && filtered_range.exclude_end?
         raise ArgumentError, "Reverse range is not allowed"
-      end
-      if filtered_range.begin == filtered_range.end && filtered_range.exclude_end?
-        return []
       end
 
       original_positions = @original_positions[filtered_range]
